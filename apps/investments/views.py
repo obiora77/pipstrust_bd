@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.utils import timezone
+from django.conf import settings
 from django.db import transaction as db_transaction
 from drf_spectacular.utils import extend_schema
 from datetime import timedelta
@@ -14,7 +15,9 @@ from .serializers import (
     InvestmentCreateSerializer, InvestmentSerializer,
     TransactionSerializer, DashboardSummarySerializer,
 )
-from apps.notifications.tasks import send_notification_email
+from apps.notifications.email_utils import send_html_email
+from apps.users.views import api_response
+
 
 # ─── Investment Plans ─────────────────────────────────────────────────────────
 @extend_schema(tags=['Plans'])
@@ -23,6 +26,12 @@ class InvestmentPlanListView(generics.ListAPIView):
     serializer_class = InvestmentPlanSerializer
     permission_classes = [AllowAny]
     queryset = InvestmentPlan.objects.filter(is_active=True)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
+
 
 # ─── Deposits ─────────────────────────────────────────────────────────────────
 @extend_schema(tags=['Deposits'])
@@ -33,10 +42,11 @@ class DepositCreateView(APIView):
     @extend_schema(request=DepositCreateSerializer, summary='Submit a deposit')
     def post(self, request):
         serializer = DepositCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
+
         deposit = serializer.save(user=request.user)
 
-        # Log transaction
         Transaction.objects.create(
             user=request.user,
             type='deposit',
@@ -46,14 +56,14 @@ class DepositCreateView(APIView):
             reference=str(deposit.id),
         )
 
-        # Notify admins
-        send_notification_email.delay(
-            subject='New Deposit Submitted',
-            message=f'User {request.user.email} submitted a deposit of ${deposit.amount} via {deposit.payment_method}.',
-            recipient_list=None,  # sends to admin
+        send_html_email(
+            subject='New Deposit Submitted - PipsTrust',
+            template_name='broadcast',
+            context={'user_name': 'Admin', 'message': f'User {request.user.email} submitted a deposit of ${deposit.amount} via {deposit.payment_method}.'},
+            recipient_list=[settings.ADMIN_EMAIL],
         )
 
-        return Response(DepositSerializer(deposit).data, status=status.HTTP_201_CREATED)
+        return api_response(data=DepositSerializer(deposit).data, message='Deposit submitted successfully.', http_status=201)
 
 
 @extend_schema(tags=['Deposits'])
@@ -67,6 +77,11 @@ class DepositListView(generics.ListAPIView):
     def get_queryset(self):
         return Deposit.objects.filter(user=self.request.user)
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
+
 
 @extend_schema(tags=['Deposits'])
 class DepositDetailView(generics.RetrieveAPIView):
@@ -76,6 +91,12 @@ class DepositDetailView(generics.RetrieveAPIView):
     def get_queryset(self):
         return Deposit.objects.filter(user=self.request.user)
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
+
+
 # ─── Investments ──────────────────────────────────────────────────────────────
 @extend_schema(tags=['Investments'])
 class InvestmentCreateView(APIView):
@@ -84,12 +105,12 @@ class InvestmentCreateView(APIView):
     @extend_schema(request=InvestmentCreateSerializer, summary='Start an investment from a confirmed deposit')
     def post(self, request):
         serializer = InvestmentCreateSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
 
         plan = serializer.validated_data['plan']
-        deposit = serializer.validated_data['deposit']
+        amount = serializer.validated_data['amount']
 
-        # Compute duration in days
         duration_days = plan.duration
         if plan.duration_unit == 'weeks':
             duration_days = plan.duration * 7
@@ -97,32 +118,51 @@ class InvestmentCreateView(APIView):
             duration_days = plan.duration * 30
 
         now = timezone.now()
-        expected_return = deposit.amount * (plan.roi_percentage / 100) + deposit.amount
+        expected_return = amount * (plan.roi_percentage / 100) + amount
 
         with db_transaction.atomic():
+            # Deduct from wallet balance
+            profile = request.user.profile
+            profile.wallet_balance -= amount
+            profile.total_deposited += amount
+            profile.save()
+
             investment = Investment.objects.create(
                 user=request.user,
                 plan=plan,
-                deposit=deposit,
-                amount=deposit.amount,
+                amount=amount,
                 roi_percentage=plan.roi_percentage,
                 expected_return=expected_return,
                 starts_at=now,
                 ends_at=now + timedelta(days=duration_days),
             )
 
-            # Update user profile
-            profile = request.user.profile
-            profile.total_deposited += deposit.amount
-            profile.save()
+            Transaction.objects.create(
+                user=request.user,
+                type='investment',
+                amount=amount,
+                status='success',
+                description=f'Investment in {plan.name} plan',
+                reference=str(investment.id),
+            )
 
-        send_notification_email.delay(
-            subject='Investment Started',
-            message=f'Your investment of ${deposit.amount} on the {plan.name} plan has started. Expected return: ${expected_return}.',
+        send_html_email(
+            subject='Investment Started - PipsTrust',
+            template_name='investment_started',
+            context={
+                'user': request.user,
+                'user_name': request.user.full_name,
+                'plan_name': plan.name,
+                'amount': amount,
+                'roi_percentage': plan.roi_percentage,
+                'expected_return': expected_return,
+                'start_date': investment.starts_at.strftime('%B %d, %Y'),
+                'end_date': investment.ends_at.strftime('%B %d, %Y'),
+            },
             recipient_list=[request.user.email],
         )
 
-        return Response(InvestmentSerializer(investment).data, status=status.HTTP_201_CREATED)
+        return api_response(data=InvestmentSerializer(investment).data, message='Investment started successfully.', http_status=201)
 
 
 @extend_schema(tags=['Investments'])
@@ -135,6 +175,11 @@ class InvestmentListView(generics.ListAPIView):
     def get_queryset(self):
         return Investment.objects.filter(user=self.request.user).select_related('plan')
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
+
 
 @extend_schema(tags=['Investments'])
 class InvestmentDetailView(generics.RetrieveAPIView):
@@ -143,6 +188,12 @@ class InvestmentDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         return Investment.objects.filter(user=self.request.user).select_related('plan')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
+
 
 # ─── Transactions ─────────────────────────────────────────────────────────────
 @extend_schema(tags=['Transactions'])
@@ -155,6 +206,12 @@ class TransactionListView(generics.ListAPIView):
 
     def get_queryset(self):
         return Transaction.objects.filter(user=self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
+
 
 # ─── Dashboard Summary ────────────────────────────────────────────────────────
 @extend_schema(tags=['Dashboard'])
@@ -175,4 +232,4 @@ class DashboardSummaryView(APIView):
             'pending_deposits': user.deposits.filter(status='pending').count(),
             'referral_count': user.referrals.count(),
         }
-        return Response(DashboardSummarySerializer(data).data)
+        return api_response(data=DashboardSummarySerializer(data).data)

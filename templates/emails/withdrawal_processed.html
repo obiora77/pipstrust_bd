@@ -1,0 +1,24 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p>Hello <strong>{{ user.full_name }}</strong>,</p>
+  <p>Your withdrawal request has been <strong>processed successfully</strong>.</p>
+
+  <div class="status-box success">
+    <div class="status-icon">✅</div>
+    <div class="status-text">Withdrawal Processed</div>
+  </div>
+
+  <table class="detail-table">
+    <tr><td>Amount</td><td>${{ amount }}</td></tr>
+    <tr><td>Method</td><td>{{ method }}</td></tr>
+    <tr><td>Payout Address</td><td>{{ payout_address }}</td></tr>
+    <tr><td>Status</td><td>Completed</td></tr>
+    <tr><td>Date</td><td>{{ date }}</td></tr>
+  </table>
+
+  <p>Please allow some time for the funds to arrive depending on your payment method.</p>
+
+  <div class="warning-note">
+    ⚠️ If you did not request this withdrawal, contact support immediately at <a href="mailto:support@pipstrust.com">support@pipstrust.com</a>.
+  </div>
+{% endblock %}

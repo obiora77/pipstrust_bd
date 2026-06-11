@@ -1,0 +1,9 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p>Hello <strong>{{ user_name }}</strong>,</p>
+  <div style="background:#f9f9f9; border-radius:8px; padding: 24px; margin: 24px 0; color: #444; font-size:15px; line-height:1.8;">
+    {{ message|linebreaks }}
+  </div>
+  <p>If you have any questions, feel free to reach out to our support team.</p>
+  <a href="mailto:support@pipstrust.com" class="btn">Contact Support</a>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p>Hello <strong>{{ user.full_name }}</strong>,</p>
+  <p>Great news! Your deposit has been <strong>confirmed</strong> and credited to your wallet.</p>
+
+  <div class="status-box success">
+    <div class="status-icon">✅</div>
+    <div class="status-text">Deposit Confirmed</div>
+  </div>
+
+  <table class="detail-table">
+    <tr><td>Amount</td><td>${{ amount }}</td></tr>
+    <tr><td>Payment Method</td><td>{{ payment_method }}</td></tr>
+    <tr><td>Status</td><td>Confirmed</td></tr>
+    <tr><td>Date</td><td>{{ date }}</td></tr>
+  </table>
+
+  <p>Your wallet balance has been updated. You can now start investing!</p>
+  <a href="{{ frontend_url }}/investments" class="btn">Start Investing</a>
+
+  <div class="warning-note">
+    ⚠️ If you did not make this deposit, please contact support immediately.
+  </div>
+{% endblock %}

@@ -5,7 +5,7 @@ Usage: python setup_beat.py
 import os
 import django
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'pipstrust.settings')
 django.setup()
 
 from django_celery_beat.models import PeriodicTask, IntervalSchedule

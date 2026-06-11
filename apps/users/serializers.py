@@ -93,10 +93,10 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'email', 'first_name', 'last_name', 'phone', 'country',
-            'avatar', 'is_verified', 'referral_code', 'referral_count',
+            'avatar', 'is_verified', 'is_staff', 'referral_code', 'referral_count',
             'profile', 'created_at',
         ]
-        read_only_fields = ['id', 'email', 'is_verified', 'referral_code', 'created_at']
+        read_only_fields = ['id', 'email', 'is_verified', 'is_staff', 'referral_code', 'created_at']
 
     def get_referral_count(self, obj):
         return obj.referrals.count()

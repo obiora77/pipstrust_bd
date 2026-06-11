@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ subject }} - PipsTrust</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, sans-serif; }
+    .wrapper { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .header { background-color: #239c6c; padding: 32px; text-align: center; }
+    .header h1 { color: #f4f4f4; margin: 0; font-size: 24px; letter-spacing: 2px; }
+    .header p { color: #bebdbd; margin: 8px 0 0; font-size: 13px; letter-spacing: 1px; }
+    .body { padding: 40px 32px; }
+    .body p { color: #444; line-height: 1.7; font-size: 15px; }
+    .amount-box { background: #f0f4ff; border: 2px dashed #1a1a2e; border-radius: 8px; text-align: center; padding: 24px; margin: 32px 0; }
+    .amount-box .amount { font-size: 42px; font-weight: bold; color: #1a1a2e; }
+    .amount-box .label { color: #888; font-size: 13px; margin-top: 8px; }
+    .status-box { border-radius: 8px; text-align: center; padding: 20px; margin: 32px 0; }
+    .status-box.success { background: #e8f5e9; border: 2px solid #4caf50; }
+    .status-box.error { background: #fdecea; border: 2px solid #e53935; }
+    .status-box.warning { background: #fff8e1; border: 2px solid #e4b800; }
+    .status-box.info { background: #e3f2fd; border: 2px solid #1e88e5; }
+    .status-box .status-icon { font-size: 36px; }
+    .status-box .status-text { font-size: 18px; font-weight: bold; margin-top: 8px; color: #1a1a2e; }
+    .detail-table { width: 100%; border-collapse: collapse; margin: 24px 0; }
+    .detail-table td { padding: 10px 0; border-bottom: 1px solid #eee; font-size: 14px; color: #444; }
+    .detail-table td:first-child { color: #888; width: 45%; }
+    .detail-table td:last-child { font-weight: bold; color: #1a1a2e; text-align: right; }
+    .warning-note { background: #fff8e1; border-left: 4px solid #e4b800; padding: 12px 16px; border-radius: 4px; color: #555; font-size: 13px; }
+    .btn { display: inline-block; background: #e4b800; color: #1a1a2e; padding: 12px 32px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin: 24px 0; }
+    .footer { background: #f9f9f9; padding: 20px 32px; text-align: center; border-top: 1px solid #eee; }
+    .footer p { color: #aaa; font-size: 12px; margin: 4px 0; }
+    .footer a { color: #1a1a2e; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1>PIPSTRUST</h1>
+      <p>Secure Investment Platform</p>
+    </div>
+    <div class="body">
+      {% block content %}{% endblock %}
+    </div>
+    <div class="footer">
+      <p>© 2025 PipsTrust. All rights reserved.</p>
+      <p><a href="{{ frontend_url }}">pipstrust.com</a> &nbsp;|&nbsp; <a href="mailto:support@pipstrust.com">support@pipstrust.com</a></p>
+      <p style="margin-top:8px; color:#ccc;">You are receiving this email because of activity on your PipsTrust account.</p>
+    </div>
+  </div>
+</body>
+</html>

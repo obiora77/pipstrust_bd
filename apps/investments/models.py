@@ -20,7 +20,7 @@ class InvestmentPlan(models.Model):
    duration_unit = models.CharField(max_length=10, choices=DURATION_UNIT, default='days')
    is_active = models.BooleanField(default=True)
    is_featured = models.BooleanField(default=False)
-   create_at = models.DateTimeField(auto_now_add=True)
+   created_at = models.DateTimeField(auto_now_add=True)
 
    def __str__(self):
       return f'{self.name} - {self.roi_percentage}% / {self.duration} {self.duration_unit}'

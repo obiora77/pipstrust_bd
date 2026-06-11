@@ -81,12 +81,12 @@ WSGI_APPLICATION = 'pipstrust.wsgi.application'
 # Database
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': config('DB_NAME', default='pipstrust_db'),
-        'USER': config('DB_USER', default='root'),
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': config('DB_NAME'),
+        'USER': config('DB_USER'),
         'PASSWORD': config('DB_PASSWORD'),
-        'HOST': config('DB_HOST', default='127.0.0.1'),
-        'PORT': config('DB_PORT', default='3306'),
+        'HOST': config('DB_HOST'),
+        'PORT': config('DB_PORT'),
     }
 }
 
@@ -173,10 +173,15 @@ EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='PipsTrust <noreply@rapidtrusts.com>')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='PipsTrust <noreply@pipstrust.com>')
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+ADMIN_EMAIL = config('ADMIN_EMAIL', default='admin@pipstrust.com')
 
 # ─── OTP ─────────────────────────────────────────────────────────────────────
 OTP_EXPIRY_MINUTES = config('OTP_EXPIRY_MINUTES', default=10, cast=int)
+
+# ─── Referral ─────────────────────────────────────────────────────────────────
+REFERRAL_BONUS_AMOUNT = config('REFERRAL_BONUS_AMOUNT', default=5.00, cast=float)
 
 # ─── Celery ──────────────────────────────────────────────────────────────────
 CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
@@ -187,6 +192,8 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+CELERY_TASK_ALWAYS_EAGER = config('CELERY_TASK_ALWAYS_EAGER', default=False, cast=bool)
+CELERY_TASK_EAGER_PROPAGATES = config('CELERY_TASK_ALWAYS_EAGER', default=False, cast=bool)
 
 # ─── API Docs ────────────────────────────────────────────────────────────────
 SPECTACULAR_SETTINGS = {

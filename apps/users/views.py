@@ -8,6 +8,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import authenticate
 from drf_spectacular.utils import extend_schema, OpenApiExample
+from django.utils import timezone
 
 from .models import User
 from .serializers import (
@@ -17,6 +18,17 @@ from .serializers import (
     UserSerializer, UpdateProfileSerializer, UserProfileSerializer,
 )
 from .otp_utils import create_otp, verify_otp, send_otp_email
+
+def api_response(data=None, message='', status_str='success', errors=None, http_status=200):
+    return Response(
+        {
+            'status': status_str,
+            'message': message,
+            'data': data,
+            'errors': errors,
+            'meta': {'timestamp': timezone.now().isoformat(), 'version': '1.0.1'}
+        }
+    )
 
 class OTPRateThrottle(AnonRateThrottle):
     rate = '5/hour'
@@ -35,15 +47,20 @@ class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if not serializer.is_valid():
-            print("VALIDATION ERRORS:", serializer.errors)
-            return Response(serializer.errors, status=400)
+            return api_response(
+                message='Validation failed',
+                status_str='error',
+                errors=serializer.errors, 
+                http_status=400,
+            )
         user = serializer.save()
         otp = create_otp(user, 'email_verification')
         send_otp_email(user, otp)
-        return Response({
-            'message': 'Registration successful. Please check your email to verify your account.',
-            'email': user.email,
-        }, status=status.HTTP_201_CREATED)
+        return api_response(
+            data={'email': user.email},
+            message='Registration successful. Please check your email to verify your account.',
+            http_status=201
+        )
 
 
 # ─── OTP Verification ─────────────────────────────────────────────────────────
@@ -58,24 +75,24 @@ class VerifyEmailView(APIView):
     )
     def post(self, request):
         serializer = OTPVerifySerializer(data={**request.data, 'purpose': 'email_verification'})
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
         try:
             user = User.objects.get(email=serializer.validated_data['email'])
         except User.DoesNotExist:
-            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return api_response(message='User not found.', status_str='error', http_status=404)
 
         success, error = verify_otp(user, serializer.validated_data['code'], 'email_verification')
         if not success:
-            return Response({'error': error}, status=status.HTTP_400_BAD_REQUEST)
+            return api_response(message=error, status_str='error', http_status=400)
 
         user.is_verified = True
         user.save()
         tokens = _get_tokens(user)
-        return Response({
-            'message': 'Email verified successfully.',
-            **tokens,
-            'user': UserSerializer(user).data,
-        })
+        return api_response(
+            data={**tokens,'user': UserSerializer(user).data},
+            message='Email verified successfully.',
+        )
 
 
 # ─── Resend OTP ───────────────────────────────────────────────────────────────
@@ -87,15 +104,17 @@ class ResendOTPView(APIView):
     @extend_schema(request=ResendOTPSerializer, summary='Resend OTP')
     def post(self, request):
         serializer = ResendOTPSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
+        
         try:
             user = User.objects.get(email=serializer.validated_data['email'])
         except User.DoesNotExist:
-            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return api_response(message='User not found.', status_str='error', http_status=404)
 
         otp = create_otp(user, serializer.validated_data['purpose'])
         send_otp_email(user, otp)
-        return Response({'message': 'OTP sent successfully. Check your email.'})
+        return api_response(message='OTP sent successfully. Check your email.')
 
 
 # ─── Login ────────────────────────────────────────────────────────────────────
@@ -106,32 +125,34 @@ class LoginView(APIView):
     @extend_schema(request=LoginSerializer, summary='Login with email and password')
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
+        
         user = authenticate(
             request,
             username=serializer.validated_data['email'],
             password=serializer.validated_data['password'],
         )
         if not user:
-            return Response({'error': 'Invalid email or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+            return api_response(message='Invalid email or password.', status_str='error', http_status=401)
         if not user.is_active:
-            return Response({'error': 'Account is disabled.'}, status=status.HTTP_403_FORBIDDEN)
+            return api_response(message='Account is disabled.', status_str='error', http_status=403)
         if not user.is_verified:
             # Re-send verification OTP
             otp = create_otp(user, 'email_verification')
             send_otp_email(user, otp)
-            return Response({
-                'error': 'Email not verified. A new OTP has been sent to your email.',
-                'requires_verification': True,
-                'email': user.email,
-            }, status=status.HTTP_403_FORBIDDEN)
+            return api_response(
+                message='Email not verified. A new OTP has been sent to your email.',
+                status_str='error',
+                errors={'requires_verification': True, 'email': user.email},
+                http_status=403,
+            )
 
         tokens = _get_tokens(user)
-        return Response({
-            'message': 'Login successful.',
-            **tokens,
-            'user': UserSerializer(user).data,
-        })
+        return api_response(
+            data={**tokens, 'user': UserSerializer(user).data},
+            message='Login successful.',
+        )
 
 
 # ─── Logout ───────────────────────────────────────────────────────────────────
@@ -143,13 +164,13 @@ class LogoutView(APIView):
     def post(self, request):
         refresh_token = request.data.get('refresh')
         if not refresh_token:
-            return Response({'error': 'Refresh token required.'}, status=status.HTTP_400_BAD_REQUEST)
+            return api_response(message='Refresh token required.', status_str='error', http_status=400)
         try:
             token = RefreshToken(refresh_token)
             token.blacklist()
         except TokenError:
-            return Response({'error': 'Invalid token.'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'message': 'Logged out successfully.'})
+            return api_response(message='Invalid token.', status_str='error', http_status=400)
+        return api_response(message='Logged out successfully.')
 
 
 # ─── Password Reset ───────────────────────────────────────────────────────────
@@ -161,14 +182,16 @@ class PasswordResetRequestView(APIView):
     @extend_schema(request=PasswordResetRequestSerializer, summary='Request password reset OTP')
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
+        
         try:
             user = User.objects.get(email=serializer.validated_data['email'])
             otp = create_otp(user, 'password_reset')
             send_otp_email(user, otp)
         except User.DoesNotExist:
             pass  # Don't reveal if email exists
-        return Response({'message': 'If an account exists with this email, a reset OTP has been sent.'})
+        return api_response(message='If an account exists with this email, a reset OTP has been sent.')
 
 
 @extend_schema(tags=['Auth'])
@@ -178,19 +201,21 @@ class PasswordResetConfirmView(APIView):
     @extend_schema(request=PasswordResetConfirmSerializer, summary='Confirm password reset with OTP')
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
+        
         try:
             user = User.objects.get(email=serializer.validated_data['email'])
         except User.DoesNotExist:
-            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return api_response(message='User not found.', status_str='error', http_status=404)
 
         success, error = verify_otp(user, serializer.validated_data['code'], 'password_reset')
         if not success:
-            return Response({'error': error}, status=status.HTTP_400_BAD_REQUEST)
+            return api_response(message=error, status_str='error', http_status=400)
 
         user.set_password(serializer.validated_data['new_password'])
         user.save()
-        return Response({'message': 'Password reset successfully. You can now login.'})
+        return api_response(message='Password reset successfully. You can now login.')
 
 
 # ─── Change Password ──────────────────────────────────────────────────────────
@@ -201,13 +226,15 @@ class ChangePasswordView(APIView):
     @extend_schema(request=ChangePasswordSerializer, summary='Change password (authenticated)')
     def post(self, request):
         serializer = ChangePasswordSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
+        
         user = request.user
         if not user.check_password(serializer.validated_data['old_password']):
-            return Response({'error': 'Old password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+            return api_response(message='Old password is incorrect.', status_str='error', http_status=400)
         user.set_password(serializer.validated_data['new_password'])
         user.save()
-        return Response({'message': 'Password changed successfully.'})
+        return api_response(message='Password changed successfully.')
 
 
 # ─── Profile ──────────────────────────────────────────────────────────────────
@@ -217,14 +244,15 @@ class MeView(APIView):
 
     @extend_schema(summary='Get current user profile')
     def get(self, request):
-        return Response(UserSerializer(request.user).data)
+        return api_response(data=UserSerializer(request.user).data)
 
     @extend_schema(request=UpdateProfileSerializer, summary='Update profile')
     def patch(self, request):
         serializer = UpdateProfileSerializer(request.user, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
         serializer.save()
-        return Response(UserSerializer(request.user).data)
+        return api_response(data=UserSerializer(request.user).data, message='Profile updated.')
 
 
 @extend_schema(tags=['Profile'])
@@ -235,9 +263,10 @@ class UpdateWalletAddressView(APIView):
     def patch(self, request):
         profile = request.user.profile
         serializer = UserProfileSerializer(profile, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
         serializer.save()
-        return Response(serializer.data)
+        return api_response(data=serializer.data, message='Wallet info updated.')
 
 
 # ─── Helper ───────────────────────────────────────────────────────────────────

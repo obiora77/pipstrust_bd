@@ -2,7 +2,8 @@ from django.contrib import admin
 from django.utils import timezone
 from django.db import transaction as db_transaction
 from .models import InvestmentPlan, Deposit, Investment, Transaction
-from apps.notifications.tasks import send_notification_email
+from apps.notifications.models import Notification
+from apps.notifications.email_utils import send_html_email
 
 
 @admin.register(InvestmentPlan)
@@ -26,28 +27,63 @@ class DepositAdmin(admin.ModelAdmin):
                 deposit.confirmed_at = timezone.now()
                 deposit.save()
 
-                # Update wallet balance
                 profile = deposit.user.profile
                 profile.wallet_balance += deposit.amount
                 profile.save()
 
-                # Log transaction
-                from apps.investments.models import Transaction
                 Transaction.objects.filter(
                     reference=str(deposit.id), type='deposit'
                 ).update(status='success')
 
-                # Notify user
-                send_notification_email.delay(
-                    subject='Deposit Confirmed',
-                    message=f'Your deposit of ${deposit.amount} has been confirmed and added to your wallet.',
+                Notification.objects.create(
+                    user=deposit.user,
+                    title='Deposit Confirmed',
+                    message=f'Your deposit of ${deposit.amount} has been confirmed.',
+                    type='success',
+                )
+
+                send_html_email(
+                    subject='Deposit Confirmed - PipsTrust',
+                    template_name='deposit_confirmed',
+                    context={
+                        'user': deposit.user,
+                        'user_name': deposit.user.full_name,
+                        'amount': deposit.amount,
+                        'payment_method': deposit.get_payment_method_display(),
+                        'date': timezone.now().strftime('%B %d, %Y %I:%M %p UTC'),
+                    },
                     recipient_list=[deposit.user.email],
                 )
+
         self.message_user(request, 'Selected deposits approved successfully.')
     approve_deposits.short_description = 'Approve selected deposits'
 
     def reject_deposits(self, request, queryset):
-        queryset.filter(status='pending').update(status='rejected')
+        with db_transaction.atomic():
+            for deposit in queryset.filter(status='pending'):
+                deposit.status = 'rejected'
+                deposit.save()
+
+                Notification.objects.create(
+                    user=deposit.user,
+                    title='Deposit Rejected',
+                    message=f'Your deposit of ${deposit.amount} was rejected.',
+                    type='error',
+                )
+
+                send_html_email(
+                    subject='Deposit Rejected - PipsTrust',
+                    template_name='deposit_rejected',
+                    context={
+                        'user': deposit.user,
+                        'user_name': deposit.user.full_name,
+                        'amount': deposit.amount,
+                        'payment_method': deposit.get_payment_method_display(),
+                        'date': timezone.now().strftime('%B %d, %Y %I:%M %p UTC'),
+                    },
+                    recipient_list=[deposit.user.email],
+                )
+
         self.message_user(request, 'Selected deposits rejected.')
     reject_deposits.short_description = 'Reject selected deposits'
 

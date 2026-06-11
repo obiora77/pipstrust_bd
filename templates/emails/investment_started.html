@@ -1,0 +1,22 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p>Hello <strong>{{ user.full_name }}</strong>,</p>
+  <p>Your investment has been <strong>activated successfully</strong>. Here are your investment details:</p>
+
+  <div class="status-box success">
+    <div class="status-icon">📈</div>
+    <div class="status-text">Investment Active</div>
+  </div>
+
+  <table class="detail-table">
+    <tr><td>Plan</td><td>{{ plan_name }}</td></tr>
+    <tr><td>Amount Invested</td><td>${{ amount }}</td></tr>
+    <tr><td>ROI</td><td>{{ roi_percentage }}%</td></tr>
+    <tr><td>Expected Return</td><td>${{ expected_return }}</td></tr>
+    <tr><td>Start Date</td><td>{{ start_date }}</td></tr>
+    <tr><td>End Date</td><td>{{ end_date }}</td></tr>
+  </table>
+
+  <p>Track your investment progress from your dashboard.</p>
+  <a href="{{ frontend_url }}/dashboard" class="btn">View Dashboard</a>
+{% endblock %}

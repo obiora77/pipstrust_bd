@@ -33,7 +33,7 @@ class Withdrawal(models.Model):
    admin_note = models.TextField(blank=True, null=True)
    processed_at = models.DateTimeField(null=True, blank=True)
    created_at = models.DateTimeField(auto_now_add=True)
-   updated_up = models.DateTimeField(auto_now=True)
+   updated_at = models.DateTimeField(auto_now=True)
 
    def __str__(self):
       return f'Withdrawal #{str(self.id)[:8]} - {self.user.email} - ${self.amount}'

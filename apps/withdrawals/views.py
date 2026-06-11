@@ -9,7 +9,8 @@ from .models import Withdrawal
 from .serializers import WithdrawalRequestSerializer, WithdrawalSerializer, OTPWithdrawalVerifySerializer
 from apps.users.otp_utils import create_otp, verify_otp, send_otp_email
 from apps.investments.models import Transaction
-from apps.notifications.tasks import send_notification_email
+from apps.notifications.email_utils import send_html_email
+from apps.users.views import api_response
 
 
 @extend_schema(tags=['Withdrawals'])
@@ -23,7 +24,8 @@ class WithdrawalRequestView(APIView):
     @extend_schema(request=WithdrawalRequestSerializer, summary='Request a withdrawal (sends OTP)')
     def post(self, request):
         serializer = WithdrawalRequestSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
 
         user = request.user
         profile = user.profile
@@ -31,7 +33,6 @@ class WithdrawalRequestView(APIView):
         method = serializer.validated_data['method']
 
         with db_transaction.atomic():
-            # Snapshot payout info
             extra = {}
             if method == 'bitcoin':
                 extra['payout_address'] = profile.bitcoin_address
@@ -48,11 +49,9 @@ class WithdrawalRequestView(APIView):
                 user=user, amount=amount, method=method, **extra
             )
 
-            # Hold amount from wallet
             profile.wallet_balance -= amount
             profile.save()
 
-            # Log transaction
             Transaction.objects.create(
                 user=user,
                 type='withdrawal',
@@ -62,14 +61,14 @@ class WithdrawalRequestView(APIView):
                 reference=str(withdrawal.id),
             )
 
-        # Send OTP for confirmation
         otp = create_otp(user, 'withdrawal')
         send_otp_email(user, otp)
 
-        return Response({
-            'message': 'Withdrawal request created. Please confirm with the OTP sent to your email.',
-            'withdrawal_id': str(withdrawal.id),
-        }, status=status.HTTP_201_CREATED)
+        return api_response(
+            data={'withdrawal_id': str(withdrawal.id)},
+            message='Withdrawal request created. Please confirm with the OTP sent to your email.',
+            http_status=201,
+        )
 
 
 @extend_schema(tags=['Withdrawals'])
@@ -83,7 +82,8 @@ class WithdrawalOTPVerifyView(APIView):
     @extend_schema(request=OTPWithdrawalVerifySerializer, summary='Confirm withdrawal with OTP')
     def post(self, request):
         serializer = OTPWithdrawalVerifySerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
 
         try:
             withdrawal = Withdrawal.objects.get(
@@ -92,26 +92,26 @@ class WithdrawalOTPVerifyView(APIView):
                 status='pending',
             )
         except Withdrawal.DoesNotExist:
-            return Response({'error': 'Withdrawal not found or already processed.'}, status=status.HTTP_404_NOT_FOUND)
+            return api_response(message='Withdrawal not found or already processed.', status_str='error', http_status=404)
 
         success, error = verify_otp(request.user, serializer.validated_data['code'], 'withdrawal')
         if not success:
-            return Response({'error': error}, status=status.HTTP_400_BAD_REQUEST)
+            return api_response(message=error, status_str='error', http_status=400)
 
         withdrawal.status = 'otp_verified'
         withdrawal.save()
 
-        # Notify admin
-        send_notification_email.delay(
-            subject='Withdrawal Confirmed by User',
-            message=f'{request.user.email} confirmed withdrawal of ${withdrawal.amount} via {withdrawal.method}.',
-            recipient_list=None,
-        )
+        send_html_email(
+                subject='Withdrawal Confirmed by User',
+                template_name='broadcast',
+                context={'user_name': 'User', 'message': f'{request.user.email} confirmed withdrawal of ${withdrawal.amount} via {withdrawal.method}.'},
+                recipient_list=None,
+            )
 
-        return Response({'message': 'Withdrawal confirmed. It will be processed shortly.'})
+        return api_response(message='Withdrawal confirmed. It will be processed shortly.')
 
 
-extend_schema(tags=['Withdrawals'])
+@extend_schema(tags=['Withdrawals'])
 class WithdrawalListView(generics.ListAPIView):
     serializer_class = WithdrawalSerializer
     permission_classes = [IsAuthenticated]
@@ -121,6 +121,11 @@ class WithdrawalListView(generics.ListAPIView):
     def get_queryset(self):
         return Withdrawal.objects.filter(user=self.request.user)
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
+
 
 @extend_schema(tags=['Withdrawals'])
 class WithdrawalDetailView(generics.RetrieveAPIView):
@@ -129,6 +134,11 @@ class WithdrawalDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         return Withdrawal.objects.filter(user=self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
 
 
 @extend_schema(tags=['Withdrawals'])
@@ -141,14 +151,13 @@ class WithdrawalCancelView(APIView):
         try:
             withdrawal = Withdrawal.objects.get(id=pk, user=request.user, status='pending')
         except Withdrawal.DoesNotExist:
-            return Response({'error': 'Withdrawal not found or cannot be cancelled.'}, status=status.HTTP_404_NOT_FOUND)
+            return api_response(message='Withdrawal not found or cannot be cancelled.', status_str='error', http_status=404)
 
         with db_transaction.atomic():
             withdrawal.status = 'rejected'
             withdrawal.admin_note = 'Cancelled by user.'
             withdrawal.save()
 
-            # Refund wallet
             profile = request.user.profile
             profile.wallet_balance += withdrawal.amount
             profile.save()
@@ -157,4 +166,4 @@ class WithdrawalCancelView(APIView):
                 reference=str(withdrawal.id), type='withdrawal'
             ).update(status='failed')
 
-        return Response({'message': 'Withdrawal cancelled and amount refunded to your wallet.'})
+        return api_response(message='Withdrawal cancelled and amount refunded to your wallet.')

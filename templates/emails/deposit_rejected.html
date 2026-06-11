@@ -1,0 +1,21 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p>Hello <strong>{{ user.full_name }}</strong>,</p>
+  <p>Unfortunately your deposit could not be confirmed at this time.</p>
+
+  <div class="status-box error">
+    <div class="status-icon">❌</div>
+    <div class="status-text">Deposit Rejected</div>
+  </div>
+
+  <table class="detail-table">
+    <tr><td>Amount</td><td>${{ amount }}</td></tr>
+    <tr><td>Payment Method</td><td>{{ payment_method }}</td></tr>
+    <tr><td>Status</td><td>Rejected</td></tr>
+    <tr><td>Date</td><td>{{ date }}</td></tr>
+    {% if reason %}<tr><td>Reason</td><td>{{ reason }}</td></tr>{% endif %}
+  </table>
+
+  <p>Please contact our support team if you believe this is an error or if you need assistance.</p>
+  <a href="mailto:support@pipstrust.com" class="btn">Contact Support</a>
+{% endblock %}

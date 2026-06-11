@@ -1,0 +1,21 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p>Hello <strong>{{ user.full_name }}</strong>,</p>
+  <p>Your withdrawal request has been <strong>rejected</strong>. The amount has been refunded to your wallet.</p>
+
+  <div class="status-box warning">
+    <div class="status-icon">⚠️</div>
+    <div class="status-text">Withdrawal Rejected & Refunded</div>
+  </div>
+
+  <table class="detail-table">
+    <tr><td>Amount</td><td>${{ amount }}</td></tr>
+    <tr><td>Method</td><td>{{ method }}</td></tr>
+    <tr><td>Status</td><td>Rejected</td></tr>
+    <tr><td>Date</td><td>{{ date }}</td></tr>
+    {% if reason %}<tr><td>Reason</td><td>{{ reason }}</td></tr>{% endif %}
+  </table>
+
+  <p>The full amount of <strong>${{ amount }}</strong> has been returned to your wallet balance.</p>
+  <a href="{{ frontend_url }}/withdrawals" class="btn">View Wallet</a>
+{% endblock %}

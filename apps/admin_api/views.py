@@ -20,7 +20,8 @@ from apps.users.models import User
 from apps.investments.models import InvestmentPlan, Deposit, Investment, Transaction
 from apps.withdrawals.models import Withdrawal
 from apps.notifications.models import Notification
-from apps.notifications.tasks import send_notification_email
+from apps.notifications.email_utils import send_html_email
+from apps.users.views import api_response
 
 
 # ─── Platform Stats ───────────────────────────────────────────────────────────
@@ -55,7 +56,7 @@ class AdminPlatformStatsView(APIView):
             'pending_withdrawals': Withdrawal.objects.filter(status__in=['pending', 'otp_verified']).count(),
             'total_platform_balance': total_platform_balance,
         }
-        return Response(AdminPlatformStatsSerializer(data).data)
+        return api_response(data=AdminPlatformStatsSerializer(data).data)
 
 
 # ─── User Management ──────────────────────────────────────────────────────────
@@ -70,6 +71,11 @@ class AdminUserListView(generics.ListAPIView):
 
     def get_queryset(self):
         return User.objects.select_related('profile').all()
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
 
 
 @extend_schema(tags=['Admin — Users'])
@@ -96,12 +102,15 @@ class AdminToggleUserStatusView(APIView):
         try:
             user = User.objects.get(id=pk)
         except User.DoesNotExist:
-            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return api_response(message='User not found.', status_str='error', http_status=404)
 
         user.is_active = not user.is_active
         user.save()
         action = 'activated' if user.is_active else 'deactivated'
-        return Response({'message': f'User {action} successfully.', 'is_active': user.is_active})
+        return api_response(
+            data={'is_active': user.is_active},
+            message=f'User {action} successfully.',
+        )
 
 
 @extend_schema(tags=['Admin — Users'])
@@ -111,12 +120,13 @@ class AdminCreditWalletView(APIView):
     @extend_schema(request=AdminCreditWalletSerializer, summary='Manually credit a user wallet')
     def post(self, request):
         serializer = AdminCreditWalletSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
 
         try:
             user = User.objects.get(id=serializer.validated_data['user_id'])
         except User.DoesNotExist:
-            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+            return api_response(message='User not found.', status_str='error', http_status=404)
 
         amount = serializer.validated_data['amount']
         description = serializer.validated_data['description']
@@ -141,13 +151,14 @@ class AdminCreditWalletView(APIView):
                 type='success',
             )
 
-        send_notification_email.delay(
-            subject='Wallet Credited',
-            message=f'Hello {user.full_name},\n\n${amount} has been credited to your wallet.\n\nRapidTrusts Team',
-            recipient_list=[user.email],
-        )
+        send_html_email(
+                subject='Wallet Credited',
+                template_name='broadcast',
+                context={'user_name': 'User', 'message': f'Hello {user.full_name},\n\n${amount} has been credited to your wallet.\n\nPipsTrust Team'},
+                recipient_list=[user.email],
+            )
 
-        return Response({'message': f'${amount} credited to {user.email} successfully.'})
+        return api_response(message=f'${amount} credited to {user.email} successfully.')
 
 
 # ─── Deposit Management ───────────────────────────────────────────────────────
@@ -162,6 +173,11 @@ class AdminDepositListView(generics.ListAPIView):
 
     def get_queryset(self):
         return Deposit.objects.select_related('user').all()
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
 
 
 @extend_schema(tags=['Admin — Deposits'])
@@ -178,12 +194,13 @@ class AdminDepositActionView(APIView):
     @extend_schema(request=AdminDepositActionSerializer, summary='Approve or reject a deposit')
     def post(self, request, pk):
         serializer = AdminDepositActionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
 
         try:
             deposit = Deposit.objects.select_related('user__profile').get(id=pk, status='pending')
         except Deposit.DoesNotExist:
-            return Response({'error': 'Deposit not found or already processed.'}, status=status.HTTP_404_NOT_FOUND)
+            return api_response(message='Deposit not found or already processed.', status_str='error', http_status=404)
 
         action = serializer.validated_data['action']
         admin_note = serializer.validated_data.get('admin_note', '')
@@ -210,12 +227,13 @@ class AdminDepositActionView(APIView):
                     type='success',
                 )
 
-                send_notification_email.delay(
-                    subject='Deposit Confirmed',
-                    message=f'Your deposit of ${deposit.amount} has been approved and added to your wallet.',
-                    recipient_list=[deposit.user.email],
-                )
-                return Response({'message': 'Deposit approved successfully.'})
+                send_html_email(
+                subject='Deposit Confirmed',
+                template_name='broadcast',
+                context={'user_name': 'User', 'message': f'Your deposit of ${deposit.amount} has been approved and added to your wallet.'},
+                recipient_list=[deposit.user.email],
+            )
+                return api_response(message='Deposit approved successfully.')
 
             else:  # reject
                 deposit.status = 'rejected'
@@ -233,12 +251,13 @@ class AdminDepositActionView(APIView):
                     type='error',
                 )
 
-                send_notification_email.delay(
-                    subject='Deposit Rejected',
-                    message=f'Your deposit of ${deposit.amount} was rejected. Reason: {admin_note}',
-                    recipient_list=[deposit.user.email],
-                )
-                return Response({'message': 'Deposit rejected.'})
+                send_html_email(
+                subject='Deposit Rejected',
+                template_name='broadcast',
+                context={'user_name': 'User', 'message': f'Your deposit of ${deposit.amount} was rejected. Reason: {admin_note}'},
+                recipient_list=[deposit.user.email],
+            )
+                return api_response(message='Deposit rejected.')
 
 
 # ─── Withdrawal Management ────────────────────────────────────────────────────
@@ -253,6 +272,11 @@ class AdminWithdrawalListView(generics.ListAPIView):
 
     def get_queryset(self):
         return Withdrawal.objects.select_related('user').all()
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
 
 
 @extend_schema(tags=['Admin — Withdrawals'])
@@ -269,14 +293,15 @@ class AdminWithdrawalActionView(APIView):
     @extend_schema(request=AdminWithdrawalActionSerializer, summary='Approve or reject a withdrawal')
     def post(self, request, pk):
         serializer = AdminWithdrawalActionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
 
         try:
             withdrawal = Withdrawal.objects.select_related('user__profile').get(
                 id=pk, status__in=['otp_verified', 'processing']
             )
         except Withdrawal.DoesNotExist:
-            return Response({'error': 'Withdrawal not found or not ready for action.'}, status=status.HTTP_404_NOT_FOUND)
+            return api_response(message='Withdrawal not found or not ready for action.', status_str='error', http_status=404)
 
         action = serializer.validated_data['action']
         admin_note = serializer.validated_data.get('admin_note', '')
@@ -303,12 +328,13 @@ class AdminWithdrawalActionView(APIView):
                     type='success',
                 )
 
-                send_notification_email.delay(
-                    subject='Withdrawal Processed',
-                    message=f'Your withdrawal of ${withdrawal.amount} has been successfully processed.',
-                    recipient_list=[withdrawal.user.email],
-                )
-                return Response({'message': 'Withdrawal approved and marked as completed.'})
+                send_html_email(
+                subject='Withdrawal Processed',
+                template_name='broadcast',
+                context={'user_name': 'User', 'message': f'Your withdrawal of ${withdrawal.amount} has been successfully processed.'},
+                recipient_list=[withdrawal.user.email],
+            )
+                return api_response(message='Withdrawal approved and marked as completed.')
 
             else:  # reject → refund
                 withdrawal.status = 'rejected'
@@ -330,12 +356,13 @@ class AdminWithdrawalActionView(APIView):
                     type='warning',
                 )
 
-                send_notification_email.delay(
-                    subject='Withdrawal Rejected',
-                    message=f'Your withdrawal of ${withdrawal.amount} was rejected. Reason: {admin_note}. The amount has been refunded to your wallet.',
-                    recipient_list=[withdrawal.user.email],
-                )
-                return Response({'message': 'Withdrawal rejected and amount refunded to user wallet.'})
+                send_html_email(
+                subject='Withdrawal Rejected',
+                template_name='broadcast',
+                context={'user_name': 'User', 'message': f'Your withdrawal of ${withdrawal.amount} was rejected. Reason: {admin_note}. The amount has been refunded to your wallet.'},
+                recipient_list=[withdrawal.user.email],
+            )
+                return api_response(message='Withdrawal rejected and amount refunded to user wallet.')
 
 
 # ─── Investment Plan Management ───────────────────────────────────────────────
@@ -344,6 +371,18 @@ class AdminPlanListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAdminUser]
     serializer_class = AdminInvestmentPlanSerializer
     queryset = InvestmentPlan.objects.all()
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return api_response(data=serializer.data)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
+        self.perform_create(serializer)
+        return api_response(data=serializer.data, message='Investment plan created.', http_status=201)
 
 
 @extend_schema(tags=['Admin — Plans'])
@@ -361,7 +400,8 @@ class AdminBroadcastView(APIView):
     @extend_schema(request=AdminBroadcastSerializer, summary='Broadcast email to users')
     def post(self, request):
         serializer = AdminBroadcastSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
 
         target = serializer.validated_data['target']
         subject = serializer.validated_data['subject']
@@ -377,19 +417,21 @@ class AdminBroadcastView(APIView):
         else:
             users = User.objects.none()
 
-        emails = list(users.values_list('email', flat=True))
+        user_list = list(users.values('id', 'email', 'first_name', 'last_name'))
 
-        # Chunk emails to avoid hitting SMTP limits
-        chunk_size = 50
-        for i in range(0, len(emails), chunk_size):
-            chunk = emails[i:i + chunk_size]
-            send_notification_email.delay(subject=subject, message=message, recipient_list=chunk)
+        for user_data in user_list:
+            full_name = f"{user_data['first_name']} {user_data['last_name']}".strip() or 'Valued Member'
+            send_html_email(
+                subject=subject,
+                template_name='broadcast',
+                context={'user_name': full_name, 'message': message},
+                recipient_list=[user_data['email']],
+            )
 
-        # Also create in-app notifications
         notifications = [
-            Notification(user_id=uid, title=subject, message=message, type='info')
-            for uid in users.values_list('id', flat=True)
+            Notification(user_id=u['id'], title=subject, message=message, type='info')
+            for u in user_list
         ]
         Notification.objects.bulk_create(notifications, batch_size=200)
 
-        return Response({'message': f'Broadcast queued for {len(emails)} users.'})
+        return api_response(message=f'Broadcast queued for {len(user_list)} users.')

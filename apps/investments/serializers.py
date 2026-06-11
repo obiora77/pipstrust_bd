@@ -38,37 +38,36 @@ class DepositSerializer(serializers.ModelSerializer):
 
 class InvestmentCreateSerializer(serializers.Serializer):
     plan_id = serializers.UUIDField()
-    deposit_id = serializers.UUIDField()
+    amount = serializers.DecimalField(max_digits=18, decimal_places=2)
 
     def validate(self, attrs):
-        from django.shortcuts import get_object_or_404
         user = self.context['request'].user
 
         plan = InvestmentPlan.objects.filter(id=attrs['plan_id'], is_active=True).first()
         if not plan:
             raise serializers.ValidationError({'plan_id': 'Investment plan not found or inactive.'})
 
-        deposit = Deposit.objects.filter(
-            id=attrs['deposit_id'], user=user, status='confirmed'
-        ).first()
-        if not deposit:
-            raise serializers.ValidationError({'deposit_id': 'Deposit not found or not confirmed yet.'})
+        amount = attrs['amount']
+        if amount <= 0:
+            raise serializers.ValidationError({'amount': 'Amount must be greater than zero.'})
 
-        if hasattr(deposit, 'investment'):
-            raise serializers.ValidationError({'deposit_id': 'This deposit is already linked to an investment.'})
-
-        if deposit.amount < plan.min_amount:
+        if amount < plan.min_amount:
             raise serializers.ValidationError(
-                f'Deposit amount (${deposit.amount}) is below the plan minimum (${plan.min_amount}).'
+                {'amount': f'Minimum investment for this plan is ${plan.min_amount}.'}
             )
 
-        if plan.max_amount and deposit.amount > plan.max_amount:
+        if plan.max_amount and amount > plan.max_amount:
             raise serializers.ValidationError(
-                f'Deposit amount (${deposit.amount}) exceeds the plan maximum (${plan.max_amount}).'
+                {'amount': f'Maximum investment for this plan is ${plan.max_amount}.'}
+            )
+
+        profile = user.profile
+        if profile.wallet_balance < amount:
+            raise serializers.ValidationError(
+                {'amount': f'Insufficient wallet balance. Available: ${profile.wallet_balance}.'}
             )
 
         attrs['plan'] = plan
-        attrs['deposit'] = deposit
         return attrs
 
 
