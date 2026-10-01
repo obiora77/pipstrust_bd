@@ -7,7 +7,6 @@ class Withdrawal(models.Model):
       ('bitcoin', 'Bitcoin'),
       ('ethereum', 'Ethereum'),
       ('usdt', 'USDT'),
-      ('bank_transfer', 'Bank Transfer')
    )
 
    STATUS = (
@@ -25,10 +24,7 @@ class Withdrawal(models.Model):
 
    # Payout destination (snapshot from profile at time of request)
    payout_address = models.CharField(max_length=255, blank=True, null=True)
-   bank_name = models.CharField(max_length=200, blank=True, null=True)
-   bank_account_number = models.CharField(max_length=50, blank=True, null=True)
-   bank_account_name = models.CharField(max_length=200, blank=True, null=True)
-
+  
    status = models.CharField(max_length=20, choices=STATUS, default='pending')
    admin_note = models.TextField(blank=True, null=True)
    processed_at = models.DateTimeField(null=True, blank=True)

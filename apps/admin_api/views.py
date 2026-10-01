@@ -134,6 +134,7 @@ class AdminCreditWalletView(APIView):
         with db_transaction.atomic():
             profile = user.profile
             profile.wallet_balance += amount
+            profile.total_earned += amount
             profile.save()
 
             Transaction.objects.create(

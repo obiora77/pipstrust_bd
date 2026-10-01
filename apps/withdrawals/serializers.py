@@ -29,8 +29,6 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Please add your Ethereum address in your profile first.')
         elif method == 'usdt' and not profile.usdt_address:
             raise serializers.ValidationError('Please add your USDT address in your profile first.')
-        elif method == 'bank_transfer' and not profile.bank_account_number:
-            raise serializers.ValidationError('Please add your bank details in your profile first.')
 
         return attrs
 
@@ -40,11 +38,9 @@ class WithdrawalSerializer(serializers.ModelSerializer):
         model = Withdrawal
         fields = [
             'id', 'amount', 'method', 'payout_address',
-            'bank_name', 'bank_account_number', 'bank_account_name',
             'status', 'admin_note', 'processed_at', 'created_at',
         ]
-        read_only_fields = ['status', 'admin_note', 'processed_at', 'payout_address',
-                            'bank_name', 'bank_account_number', 'bank_account_name']
+        read_only_fields = ['status', 'admin_note', 'processed_at', 'payout_address']
 
 
 class OTPWithdrawalVerifySerializer(serializers.Serializer):

@@ -40,10 +40,6 @@ class WithdrawalRequestView(APIView):
                 extra['payout_address'] = profile.ethereum_address
             elif method == 'usdt':
                 extra['payout_address'] = profile.usdt_address
-            elif method == 'bank_transfer':
-                extra['bank_name'] = profile.bank_name
-                extra['bank_account_number'] = profile.bank_account_number
-                extra['bank_account_name'] = profile.bank_account_name
 
             withdrawal = Withdrawal.objects.create(
                 user=user, amount=amount, method=method, **extra
