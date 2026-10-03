@@ -16,8 +16,9 @@ from .serializers import (
     AdminInvestmentPlanSerializer, AdminPlatformStatsSerializer,
     AdminBroadcastSerializer, AdminCreditWalletSerializer,
 )
-from apps.users.models import User
+from apps.users.models import User, UserProfile
 from apps.investments.models import InvestmentPlan, Deposit, Investment, Transaction
+from apps.investments.services import settle_matured_investments
 from apps.withdrawals.models import Withdrawal
 from apps.notifications.models import Notification
 from apps.notifications.email_utils import send_html_email
@@ -31,6 +32,7 @@ class AdminPlatformStatsView(APIView):
 
     @extend_schema(responses=AdminPlatformStatsSerializer, summary='Get platform-wide statistics')
     def get(self, request):
+        settle_matured_investments()
         total_deposits = Deposit.objects.filter(status='confirmed').aggregate(
             total=Sum('amount')
         )['total'] or 0
@@ -198,24 +200,24 @@ class AdminDepositActionView(APIView):
         if not serializer.is_valid():
             return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
 
-        try:
-            deposit = Deposit.objects.select_related('user__profile').get(id=pk, status='pending')
-        except Deposit.DoesNotExist:
-            return api_response(message='Deposit not found or already processed.', status_str='error', http_status=404)
-
         action = serializer.validated_data['action']
         admin_note = serializer.validated_data.get('admin_note', '')
 
         with db_transaction.atomic():
+            deposit = (Deposit.objects.select_for_update().select_related('user').filter(id=pk, status='pending').first())
+            if not deposit:
+                return api_response(message='Deposit not found or already processed.', status_str='error', http_status=404)
+            
             if action == 'approve':
                 deposit.status = 'confirmed'
                 deposit.confirmed_at = timezone.now()
                 deposit.admin_note = admin_note
                 deposit.save()
 
-                profile = deposit.user.profile
+                profile = UserProfile.objects.select_for_update().get(user=deposit.user)
                 profile.wallet_balance += deposit.amount
-                profile.save()
+                profile.total_deposited += deposit.amount
+                profile.save(update_fields=['wallet_balance', 'total_deposit', 'updated_at'])
 
                 Transaction.objects.filter(
                     reference=str(deposit.id), type='deposit'
@@ -297,26 +299,27 @@ class AdminWithdrawalActionView(APIView):
         if not serializer.is_valid():
             return api_response(message='Validation failed.', status_str='error', errors=serializer.errors, http_status=400)
 
-        try:
-            withdrawal = Withdrawal.objects.select_related('user__profile').get(
-                id=pk, status__in=['otp_verified', 'processing']
-            )
-        except Withdrawal.DoesNotExist:
-            return api_response(message='Withdrawal not found or not ready for action.', status_str='error', http_status=404)
-
         action = serializer.validated_data['action']
         admin_note = serializer.validated_data.get('admin_note', '')
 
         with db_transaction.atomic():
+            withdrawal = (
+                Withdrawal.objects.select_for_update().select_related('user').filter(
+                    id=pk, status__in=['otp_verified', 'processing']
+                ).first()
+            )
+            if not withdrawal:
+                return api_response(message='Withdrawal not found or not ready for action', status_str='error', http_status=404)
+            
             if action == 'approve':
                 withdrawal.status = 'completed'
                 withdrawal.admin_note = admin_note
                 withdrawal.processed_at = timezone.now()
                 withdrawal.save()
 
-                profile = withdrawal.user.profile
+                profile = UserProfile.objects.select_for_update().get(user=withdrawal.user)
                 profile.total_withdrawn += withdrawal.amount
-                profile.save()
+                profile.save(update_fields=['total_withdrawn', 'updated_at'])
 
                 Transaction.objects.filter(
                     reference=str(withdrawal.id), type='withdrawal'
@@ -342,9 +345,9 @@ class AdminWithdrawalActionView(APIView):
                 withdrawal.admin_note = admin_note
                 withdrawal.save()
 
-                profile = withdrawal.user.profile
+                profile = UserProfile.objects.select_for_update().get(user=withdrawal.user)
                 profile.wallet_balance += withdrawal.amount
-                profile.save()
+                profile.save(update_fields=['wallet_balance', 'updated_at'])
 
                 Transaction.objects.filter(
                     reference=str(withdrawal.id), type='withdrawal'

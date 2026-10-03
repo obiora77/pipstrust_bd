@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/withdrawals/', include('apps.withdrawals.urls')),
     path('api/notifications/', include('apps.notifications.urls')),
     path('api/admin/', include('apps.admin_api.urls')),
+    path('api/support/', include('apps.support.urls')),
 ]
 
 if settings.DEBUG:

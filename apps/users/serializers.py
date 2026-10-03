@@ -78,8 +78,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = [
-            'bitcoin_address', 'ethereum_address', 'usdt_address',
-            'bank_name', 'bank_account_number', 'bank_account_name',
+            'bitcoin_address', 'ethereum_address', 'usdt_address', 'usdt_erc20_address',
             'total_deposited', 'total_withdrawn', 'total_earned', 'wallet_balance',
         ]
         read_only_fields = ['total_deposited', 'total_withdrawn', 'total_earned', 'wallet_balance']

@@ -10,10 +10,10 @@ django.setup()
 
 from django_celery_beat.models import PeriodicTask, IntervalSchedule
 
-# Every 1 hour — process matured investments
+# Every 1 minute — process matured investments
 schedule, _ = IntervalSchedule.objects.get_or_create(
     every=1,
-    period=IntervalSchedule.HOURS,
+    period=IntervalSchedule.MINUTES,
 )
 
 PeriodicTask.objects.update_or_create(

@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 from apps.users.models import User, UserProfile
 from apps.investments.models import InvestmentPlan, Deposit, Investment, Transaction
@@ -30,7 +31,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
         ]
 
     def get_active_investments(self, obj):
-        return obj.investments.filter(status='active').count()
+        return obj.investments.filter(status='active', ends_at__gt=timezone.now()).count()
 
     def get_referral_count(self, obj):
         return obj.referrals.count()
@@ -83,8 +84,7 @@ class AdminWithdrawalSerializer(serializers.ModelSerializer):
         model = Withdrawal
         fields = [
             'id', 'user_email', 'user_name', 'amount', 'method',
-            'payout_address', 'bank_name', 'bank_account_number', 'bank_account_name',
-            'status', 'admin_note', 'processed_at', 'created_at',
+            'payout_address', 'status', 'admin_note', 'processed_at', 'created_at',
         ]
 
 

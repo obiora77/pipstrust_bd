@@ -6,6 +6,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.utils import timezone
 from django.conf import settings
 from django.db import transaction as db_transaction
+from django.db.models import Sum
 from drf_spectacular.utils import extend_schema
 from datetime import timedelta
 
@@ -17,6 +18,8 @@ from .serializers import (
 )
 from apps.notifications.email_utils import send_html_email
 from apps.users.views import api_response
+from apps.users.models import UserProfile
+from .services import settle_matured_investments
 
 
 # ─── Investment Plans ─────────────────────────────────────────────────────────
@@ -121,11 +124,17 @@ class InvestmentCreateView(APIView):
         expected_return = amount * (plan.roi_percentage / 100) + amount
 
         with db_transaction.atomic():
-            # Deduct from wallet balance
-            profile = request.user.profile
+            # Lock and re-check the wallet so concurrent requests cannot overspend.
+            profile = UserProfile.objects.select_for_update().get(user=request.user)
+            if profile.wallet_balance < amount:
+                return api_response(
+                    message=f'Insufficient wallet balance. Available: ${profile.wallet_balance}.',
+                    status_str='error',
+                    http_status=400,
+                )
             profile.wallet_balance -= amount
             profile.total_deposited += amount
-            profile.save()
+            profile.save(update_fields=['wallet_balance', 'updated_at'])
 
             investment = Investment.objects.create(
                 user=request.user,
@@ -221,15 +230,29 @@ class DashboardSummaryView(APIView):
     @extend_schema(responses=DashboardSummarySerializer, summary='Get user dashboard summary')
     def get(self, request):
         user = request.user
-        profile = user.profile
+        settle_matured_investments(user=user)
+        profile = UserProfile.objects.get(user=user)
+
+        total_deposited = user.deposits.filter(status='confirmed').aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+        total_withdrawn = user.withdrawal.filter(status='completed').aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+        total_invested = user.investments.aggregate(total=Sum('amount'))['total'] or 0
+
         data = {
             'wallet_balance': profile.wallet_balance,
-            'total_deposited': profile.total_deposited,
-            'total_withdrawn': profile.total_withdrawn,
+            'total_deposited': total_deposited,
+            'total_withdrawn': total_withdrawn,
             'total_earned': profile.total_earned,
+            'total_invested': total_invested,
             'active_investments': user.investments.filter(status='active').count(),
             'completed_investments': user.investments.filter(status='completed').count(),
             'pending_deposits': user.deposits.filter(status='pending').count(),
+            'pending_withdrawals': user.withdrawal.filter(
+                status__in=['pending', 'otp_verified', 'processing']
+            ).count(),
             'referral_count': user.referrals.count(),
         }
         return api_response(data=DashboardSummarySerializer(data).data)

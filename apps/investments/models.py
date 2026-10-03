@@ -35,7 +35,7 @@ class Deposit(models.Model):
       ('bitcoin', 'Bitcoin'),
       ('ethereum', 'Ethereum'),
       ('usdt', 'USDT'),
-      ('bank_transfer', 'Bank Transfer'),
+      ('usdt2', 'USDT (ERC-20)'),
    )
 
    STATUS = (
@@ -91,12 +91,21 @@ class Investment(models.Model):
     @property
     def progress_percentage(self):
         from django.utils import timezone
+
+        if self.status == 'completed':
+            return 100
+        
         now = timezone.now()
+        if now <= self.starts_at:
+            return 0
         if now >= self.ends_at:
             return 100
+        
         total = (self.ends_at - self.starts_at).total_seconds()
+        if total <= 0:
+            return 100
         elapsed = (now - self.starts_at).total_seconds()
-        return min(round((elapsed / total) * 100, 2), 100)
+        return max(0, min(round((elapsed / total) * 100, 2), 100))
 
     class Meta:
         db_table = 'investments'
@@ -109,6 +118,7 @@ class Transaction(models.Model):
         ('withdrawal', 'Withdrawal'),
         ('roi', 'ROI Credit'),
         ('referral_bonus', 'Referral Bonus'),
+        ('investment', 'Investment'),
     )
 
     STATUS = (

@@ -6,7 +6,8 @@ class Withdrawal(models.Model):
    METHOD = (
       ('bitcoin', 'Bitcoin'),
       ('ethereum', 'Ethereum'),
-      ('usdt', 'USDT'),
+      ('usdt', 'USDT (TRC-20)'),
+      ('usdt2', 'USDT (ERC-20)'),
    )
 
    STATUS = (
